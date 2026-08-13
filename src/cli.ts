@@ -1,6 +1,7 @@
 import { Console, Effect } from "effect"
 import { Command, Flag } from "effect/unstable/cli"
 
+import packageJson from "../package.json" with { type: "json" }
 import { runCleanup } from "./cleanup.js"
 
 const directory = Flag.string("dir").pipe(
@@ -54,4 +55,4 @@ export const command = Command.make(
   ])
 )
 
-export const program = command.pipe(Command.run({ version: "0.1.0" }))
+export const program = command.pipe(Command.run({ version: packageJson.version }))
