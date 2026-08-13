@@ -19,8 +19,8 @@
     "url": "git+https://github.com/Thanaen/worktree-cleanup.git"
   },
   "bin": {
-    "worktree-clean": "./dist/main.mjs",
-    "worktree-cleanup": "./dist/main.mjs"
+    "worktree-clean": "dist/main.mjs",
+    "worktree-cleanup": "dist/main.mjs"
   },
   "files": [
     "dist",
