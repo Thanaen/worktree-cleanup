@@ -1,60 +1,93 @@
 # worktree-cleanup
 
-Safely remove stale Git worktrees created by coding agents and other tooling.
-The command is conservative: a worktree must be registered, clean, unlocked,
-and already merged into a trusted base branch before it can be offered for
-deletion.
+Clean up stale Git worktrees left behind by coding agents and other tooling,
+without putting uncommitted work at risk.
 
-> The npm package will be published as `@thanaen/worktree-cleanup`. npm package
-> scopes are lowercase even though the GitHub account is displayed as Thanaen.
+`worktree-cleanup` first shows exactly what it found and why each directory is
+removable or skipped. Nothing is deleted until you confirm the plan.
 
 ## Install
 
+Requires Git and Node.js 22 or newer.
+
 ```bash
-pnpm add -g @thanaen/worktree-cleanup
+npm install --global @thanaen/worktree-cleanup
 ```
 
-## Usage
+Also available with pnpm or Bun:
 
 ```bash
-# Inspect smart defaults below the current directory
+pnpm add --global @thanaen/worktree-cleanup
+bun add --global @thanaen/worktree-cleanup
+```
+
+## Quick start
+
+Run the command from your project directory:
+
+```bash
 worktree-cleanup
-
-# Equivalent shorter executable
-worktree-clean
-
-# Inspect exactly one root and ignore smart defaults
-worktree-cleanup --dir ../agent-worktrees
-
-# Approve the displayed plan without prompting
-worktree-cleanup --yes
 ```
 
-Smart defaults are `worktrees`, `.claude/worktrees`, and `.codex/worktrees`.
-Only their immediate child directories are inspected.
+The shorter `worktree-clean` command does the same thing.
 
-The command never force-removes a worktree and never deletes its branch. It
-asks once before deletion unless `-y` or `--yes` is passed. If stdin is not an
-interactive terminal, `--yes` is required.
+By default, the CLI looks for these directories in the current directory:
 
-## What counts as stale?
+- `worktrees`
+- `.claude/worktrees`
+- `.codex/worktrees`
 
-A worktree is removable only when all of these are true:
+Only immediate child directories are inspected. If you keep worktrees
+somewhere else, select that directory explicitly:
 
-- Git lists it as a registered worktree.
-- It is not the main or currently executing worktree.
-- It is unlocked and clean, including untracked files.
-- Its HEAD is an ancestor of the detected base ref.
+```bash
+worktree-cleanup --dir ../agent-worktrees
+```
 
-Base detection prefers `origin/HEAD`, then local `main`, local `master`, and
-finally the main worktree's current branch. Uncertain state is always skipped.
-Every candidate is revalidated immediately before removal.
+Using `--dir` disables the smart defaults. To approve the displayed plan
+without an interactive prompt, pass `-y` or `--yes`:
+
+```bash
+worktree-cleanup --dir ../agent-worktrees --yes
+```
+
+In a non-interactive environment, `--yes` is required.
+
+## What is safe to remove?
+
+A worktree is offered for removal only when every check passes:
+
+- Git recognizes it as a registered worktree.
+- It is neither the repository's main worktree nor the worktree running the
+  command.
+- It is unlocked.
+- It has no tracked changes or untracked files.
+- Its `HEAD` is already an ancestor of the detected base branch.
+
+The base branch is detected from `origin/HEAD`, then local `main`, local
+`master`, and finally the main worktree's current branch. If the CLI cannot
+prove that a directory is safe, it skips it and explains why.
+
+Candidates are checked again immediately before removal. The CLI uses
+`git worktree remove` without `--force` and never deletes branches.
+
+### A note about remote branches
+
+The CLI does not contact GitHub, and a deleted remote branch alone does not
+prove that its work was merged. Run `git fetch --prune` first if you want the
+decision to use the latest remote refs. Squash-merged or rebased branches may
+still be skipped because their original `HEAD` is not an ancestor of the base
+branch; this conservative behavior avoids discarding work based on a guess.
+
+If a repository has been moved, Git may still hold worktree paths from its old
+location. In that case, repair the metadata with `git worktree repair` before
+running the cleanup again.
 
 ## Development
 
-This repository follows GitHub Spec Kit. The feature contract is in
-`specs/001-core-cleanup/`. Effect's official source is vendored under `repos/`
-as a Git subtree and used as read-only reference material.
+The project is built with Effect v4 and follows the GitHub Spec Kit workflow.
+The feature contract lives in `specs/001-core-cleanup/`. Effect's official
+source is vendored under `repos/` as a read-only reference using a Git subtree.
 
 ```bash
 pnpm install
