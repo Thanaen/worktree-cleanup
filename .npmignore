@@ -1,0 +1,2 @@
+# npm uses this file instead of .gitignore; package.json's files allowlist
+# defines the published surface and includes the generated dist directory.
