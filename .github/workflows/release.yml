@@ -25,6 +25,17 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - name: Verify package contents
+        run: |
+          npm pack --dry-run --json | jq --exit-status '
+            .[0].files | map(.path) as $files |
+            all(
+              "dist/main.mjs",
+              "dist/index.mjs",
+              "dist/index.d.mts";
+              . as $required | $files | index($required) != null
+            )
+          '
       - run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
