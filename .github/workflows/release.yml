@@ -53,4 +53,15 @@ jobs:
           test -x "$install_dir/node_modules/.bin/worktree-cleanup"
           "$install_dir/node_modules/.bin/worktree-clean" --help >/dev/null
           "$install_dir/node_modules/.bin/worktree-cleanup" --help >/dev/null
-      - run: npm publish --access public --provenance
+      - name: Check registry
+        id: registry
+        run: |
+          package="$(node --input-type=module --eval "import packageJson from './package.json' with { type: 'json' }; process.stdout.write(packageJson.name)")"
+          version="$(node --input-type=module --eval "import packageJson from './package.json' with { type: 'json' }; process.stdout.write(packageJson.version)")"
+          if npm view "$package@$version" version >/dev/null 2>&1; then
+            echo "already-published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already-published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.registry.outputs.already-published != 'true'
+        run: npm publish --access public --provenance
