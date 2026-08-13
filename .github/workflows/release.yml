@@ -27,7 +27,9 @@ jobs:
       - run: pnpm check
       - name: Verify package contents
         run: |
-          npm pack --dry-run --json | jq --exit-status '
+          package_dir="$(mktemp -d)"
+          package_json="$(npm pack --pack-destination "$package_dir" --json)"
+          jq --exit-status '
             .[0].files | map(.path) as $files |
             all(
               "dist/main.mjs",
@@ -35,7 +37,15 @@ jobs:
               "dist/index.d.mts";
               . as $required | $files | index($required) != null
             )
-          '
+          ' <<< "$package_json"
+          package_file="$(jq --raw-output '.[0].filename' <<< "$package_json")"
+          tar --extract --to-stdout --file "$package_dir/$package_file" package/package.json |
+            jq --exit-status '
+              .bin["worktree-clean"] == "dist/main.mjs" and
+              .bin["worktree-cleanup"] == "dist/main.mjs" and
+              .exports["."].import == "./dist/index.mjs" and
+              .exports["."].types == "./dist/index.d.mts"
+            '
       - run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
