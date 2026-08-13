@@ -60,6 +60,7 @@ describe("runCleanup with real Git worktrees", () => {
 
         yield* runGit(repository, ["worktree", "add", "-b", "locked", locked, "main"])
         yield* runGit(repository, ["worktree", "lock", "--reason", "active agent", locked])
+        const canonicalMerged = yield* fs.realPath(merged)
 
         const result = yield* runCleanup({
           cwd: repository,
@@ -68,7 +69,7 @@ describe("runCleanup with real Git worktrees", () => {
           interactive: false
         })
 
-        assert.deepStrictEqual(result.removed, [merged])
+        assert.deepStrictEqual(result.removed, [canonicalMerged])
         assert.isFalse(yield* fs.exists(merged))
         assert.isTrue(yield* fs.exists(unmerged))
         assert.isTrue(yield* fs.exists(dirty))
@@ -110,6 +111,7 @@ describe("runCleanup with real Git worktrees", () => {
           explicitWorktree,
           "main"
         ])
+        const canonicalExplicitWorktree = yield* fs.realPath(explicitWorktree)
 
         const result = yield* runCleanup({
           cwd: repository,
@@ -118,7 +120,7 @@ describe("runCleanup with real Git worktrees", () => {
           interactive: false
         })
 
-        assert.deepStrictEqual(result.removed, [explicitWorktree])
+        assert.deepStrictEqual(result.removed, [canonicalExplicitWorktree])
         assert.isTrue(yield* fs.exists(defaultWorktree))
         assert.isFalse(yield* fs.exists(explicitWorktree))
       } finally {
