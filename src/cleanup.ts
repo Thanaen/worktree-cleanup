@@ -20,6 +20,11 @@ const smartRoots = [
 
 const trim = (value: string): string => value.trim()
 
+const pathKey = (pathService: Path.Path, value: string): string => {
+  const normalized = pathService.normalize(value)
+  return pathService.sep === "\\" ? normalized.toLowerCase() : normalized
+}
+
 const discoveryFailure = (path: string, message: string) => (cause: unknown) =>
   new DiscoveryError({ path, message, cause })
 
@@ -221,16 +226,29 @@ export const assessCandidate = Effect.fn("assessCandidate")(function* (
     return skipped(candidate, "git-error", "Git returned an empty worktree list")
   }
 
-  const canonicalWorktrees = yield* Effect.forEach(worktrees, (worktree) =>
-    fs.realPath(worktree.path).pipe(
-      Effect.orElseSucceed(() => path.normalize(worktree.path)),
-      Effect.map((canonicalPath) => ({ ...worktree, path: canonicalPath }))
-    )
-  )
-  const worktree = canonicalWorktrees.find((entry) => entry.path === candidate.path)
-  const canonicalMain = canonicalWorktrees[0]
-  if (worktree === undefined || canonicalMain === undefined) {
+  const topLevel = yield* git.run(candidate.path, [
+    "rev-parse",
+    "--path-format=absolute",
+    "--show-toplevel"
+  ])
+  if (topLevel.exitCode !== 0) {
+    return skipped(candidate, "git-error", trim(topLevel.stderr))
+  }
+
+  // Git for Windows can spell the same path using either its long form or an
+  // 8.3 component (for example `runneradmin` versus `RUNNER~1`). Match the
+  // path reported by Git from inside the candidate against Git's own list.
+  const gitCandidatePath = pathKey(path, trim(topLevel.stdout))
+  const registered = worktrees.find((entry) => pathKey(path, entry.path) === gitCandidatePath)
+  if (registered === undefined) {
     return skipped(candidate, "not-registered")
+  }
+  const worktree = { ...registered, path: candidate.path }
+  const canonicalMain = {
+    ...mainWorktree,
+    path: yield* fs
+      .realPath(mainWorktree.path)
+      .pipe(Effect.orElseSucceed(() => path.normalize(mainWorktree.path)))
   }
   const repositoryPath = canonicalMain.path
   const context = { repositoryPath, worktree }
