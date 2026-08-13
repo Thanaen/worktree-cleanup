@@ -53,6 +53,9 @@ jobs:
           test -x "$install_dir/node_modules/.bin/worktree-cleanup"
           "$install_dir/node_modules/.bin/worktree-clean" --help >/dev/null
           "$install_dir/node_modules/.bin/worktree-cleanup" --help >/dev/null
+          expected_version="$(jq --raw-output '.[0].version' <<< "$package_json")"
+          test "$("$install_dir/node_modules/.bin/worktree-clean" --version)" = "worktree-cleanup v$expected_version"
+          test "$("$install_dir/node_modules/.bin/worktree-cleanup" --version)" = "worktree-cleanup v$expected_version"
       - name: Check registry
         id: registry
         run: |
