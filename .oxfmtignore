@@ -1,0 +1,7 @@
+repos/
+.agents/
+.specify/
+node_modules/
+dist/
+coverage/
+.git/

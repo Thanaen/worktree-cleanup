@@ -1,0 +1,69 @@
+{
+  "name": "@thanaen/worktree-cleanup",
+  "version": "0.1.0",
+  "description": "Safely discover and remove stale Git worktrees.",
+  "keywords": [
+    "cleanup",
+    "effect",
+    "git",
+    "worktree"
+  ],
+  "homepage": "https://github.com/Thanaen/worktree-cleanup#readme",
+  "bugs": {
+    "url": "https://github.com/Thanaen/worktree-cleanup/issues"
+  },
+  "license": "MIT",
+  "author": "Thanaen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Thanaen/worktree-cleanup.git"
+  },
+  "bin": {
+    "worktree-clean": "./dist/main.mjs",
+    "worktree-cleanup": "./dist/main.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check": "pnpm format:check && pnpm diagnostics && pnpm typecheck && pnpm test && pnpm build",
+    "diagnostics": "effect-tsgo diagnostics --project tsconfig.json",
+    "format": "oxfmt --ignore-path=.oxfmtignore .",
+    "format:check": "oxfmt --check --ignore-path=.oxfmtignore .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepare": "effect-tsgo patch --typescript --no-oxlint"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-rc.108",
+    "effect": "4.0.0-rc.108"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.36.4",
+    "@effect/vitest": "4.0.0-rc.108",
+    "@types/node": "26.2.0",
+    "oxfmt": "0.63.0",
+    "tsdown": "0.22.14",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.17.1"
+}
