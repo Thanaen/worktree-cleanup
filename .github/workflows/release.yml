@@ -54,5 +54,3 @@ jobs:
           "$install_dir/node_modules/.bin/worktree-clean" --help >/dev/null
           "$install_dir/node_modules/.bin/worktree-cleanup" --help >/dev/null
       - run: npm publish --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
