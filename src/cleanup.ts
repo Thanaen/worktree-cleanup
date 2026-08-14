@@ -5,6 +5,7 @@ import type {
   Assessment,
   Candidate,
   CleanupResult,
+  IntegrationEvidence,
   RegisteredWorktree,
   TargetRoot
 } from "./domain.js"
@@ -195,6 +196,128 @@ const skipped = (
   ...(context?.baseRef === undefined ? {} : { baseRef: context.baseRef })
 })
 
+type IntegrationAssessment =
+  | { readonly status: "integrated"; readonly evidence: IntegrationEvidence }
+  | { readonly status: "not-integrated"; readonly detail: string }
+  | { readonly status: "git-error"; readonly detail: string }
+
+const integrated = (evidence: IntegrationEvidence): IntegrationAssessment => ({
+  status: "integrated",
+  evidence
+})
+
+const notIntegrated = (detail: string): IntegrationAssessment => ({
+  status: "not-integrated",
+  detail
+})
+
+const integrationGitError = (detail: string): IntegrationAssessment => ({
+  status: "git-error",
+  detail
+})
+
+const assessIntegration = Effect.fn("assessIntegration")(function* (
+  repositoryPath: string,
+  worktree: RegisteredWorktree & { readonly head: string },
+  baseRef: string
+) {
+  const git = yield* Git
+  const baseCommitResult = yield* git.run(repositoryPath, [
+    "rev-parse",
+    "--verify",
+    "--end-of-options",
+    `${baseRef}^{commit}`
+  ])
+  if (baseCommitResult.exitCode !== 0) {
+    return integrationGitError(trim(baseCommitResult.stderr))
+  }
+  const baseCommit = trim(baseCommitResult.stdout)
+
+  const ancestor = yield* git.run(repositoryPath, [
+    "merge-base",
+    "--is-ancestor",
+    worktree.head,
+    baseCommit
+  ])
+  if (ancestor.exitCode === 0) return integrated("ancestor")
+  if (ancestor.exitCode !== 1) {
+    return integrationGitError(trim(ancestor.stderr))
+  }
+
+  const baseDetail = `base: ${baseRef}`
+  if (worktree.detached || worktree.branch === undefined) {
+    return notIntegrated(`${baseDetail}; content-equivalence proof requires an attached branch`)
+  }
+
+  const customDrivers = yield* git.run(repositoryPath, [
+    "config",
+    "--get-regexp",
+    "^merge\\..*\\.driver$"
+  ])
+  if (customDrivers.exitCode === 0) {
+    return notIntegrated(
+      `${baseDetail}; content-equivalence proof is disabled when custom merge drivers are configured`
+    )
+  }
+  if (customDrivers.exitCode !== 1) {
+    return integrationGitError(trim(customDrivers.stderr))
+  }
+
+  const defaultDriver = yield* git.run(repositoryPath, ["config", "--get-all", "merge.default"])
+  if (defaultDriver.exitCode === 0) {
+    return notIntegrated(
+      `${baseDetail}; content-equivalence proof is disabled when a default merge driver is configured`
+    )
+  }
+  if (defaultDriver.exitCode !== 1) {
+    return integrationGitError(trim(defaultDriver.stderr))
+  }
+
+  const baseTreeResult = yield* git.run(repositoryPath, [
+    "rev-parse",
+    "--verify",
+    "--end-of-options",
+    `${baseCommit}^{tree}`
+  ])
+  if (baseTreeResult.exitCode !== 0) {
+    return integrationGitError(trim(baseTreeResult.stderr))
+  }
+
+  const mergeTree = yield* git.run(repositoryPath, [
+    "merge-tree",
+    "--write-tree",
+    baseCommit,
+    worktree.head
+  ])
+  if (mergeTree.exitCode === 1) {
+    return notIntegrated(`${baseDetail}; simulated merge has conflicts`)
+  }
+  if (mergeTree.exitCode !== 0) {
+    if (mergeTree.exitCode === 129) {
+      return integrationGitError("content-equivalence proof requires Git 2.38 or newer")
+    }
+    const message = trim(mergeTree.stderr)
+    return integrationGitError(
+      message.length === 0 ? "content-equivalence proof requires Git 2.38 or newer" : message
+    )
+  }
+  if (trim(mergeTree.stdout) !== trim(baseTreeResult.stdout)) {
+    return notIntegrated(`${baseDetail}; branch still contributes content not present in the base`)
+  }
+
+  const branchHead = yield* git.run(repositoryPath, [
+    "rev-parse",
+    "--verify",
+    "--end-of-options",
+    `${worktree.branch}^{commit}`
+  ])
+  if (branchHead.exitCode !== 0 || trim(branchHead.stdout) !== worktree.head) {
+    return notIntegrated(`${baseDetail}; attached branch no longer points at the assessed HEAD`)
+  }
+
+  return integrated("content-equivalent")
+})
+
 export const assessCandidate = Effect.fn("assessCandidate")(function* (
   candidate: Candidate,
   currentWorktree: string | undefined
@@ -271,17 +394,16 @@ export const assessCandidate = Effect.fn("assessCandidate")(function* (
   const baseRef = yield* detectBaseRef(repositoryPath, canonicalMain)
   if (baseRef === undefined) return skipped(candidate, "base-ref-unknown", undefined, context)
 
-  const merged = yield* git.run(repositoryPath, [
-    "merge-base",
-    "--is-ancestor",
-    worktree.head,
+  const integration = yield* assessIntegration(
+    repositoryPath,
+    { ...worktree, head: worktree.head },
     baseRef
-  ])
-  if (merged.exitCode === 1) {
-    return skipped(candidate, "not-merged", `base: ${baseRef}`, { ...context, baseRef })
+  )
+  if (integration.status === "not-integrated") {
+    return skipped(candidate, "not-merged", integration.detail, { ...context, baseRef })
   }
-  if (merged.exitCode !== 0) {
-    return skipped(candidate, "git-error", trim(merged.stderr), { ...context, baseRef })
+  if (integration.status === "git-error") {
+    return skipped(candidate, "git-error", integration.detail, { ...context, baseRef })
   }
 
   return {
@@ -289,6 +411,7 @@ export const assessCandidate = Effect.fn("assessCandidate")(function* (
     repositoryPath,
     worktree,
     baseRef,
+    integrationEvidence: integration.evidence,
     status: "removable" as const
   }
 })
@@ -307,7 +430,8 @@ const renderPlan = Effect.fn("renderPlan")(function* (
   yield* Console.log(`Removable (${removable.length}):`)
   if (removable.length === 0) yield* Console.log("  - none")
   for (const assessment of removable) {
-    yield* Console.log(`  REMOVE ${assessment.candidate.path} [${assessment.baseRef}]`)
+    const evidence = assessment.integrationEvidence ?? "unknown"
+    yield* Console.log(`  REMOVE ${assessment.candidate.path} [${assessment.baseRef}; ${evidence}]`)
   }
 
   yield* Console.log(`Skipped (${skippedItems.length}):`)

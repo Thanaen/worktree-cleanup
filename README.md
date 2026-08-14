@@ -62,7 +62,8 @@ A worktree is offered for removal only when every check passes:
   command.
 - It is unlocked.
 - It has no tracked changes or untracked files.
-- Its `HEAD` is already an ancestor of the detected base branch.
+- Its `HEAD` is already an ancestor of the detected base branch, or its
+  attached branch can be merged without changing the base branch's content.
 
 The base branch is detected from `origin/HEAD`, then local `main`, local
 `master`, and finally the main worktree's current branch. If the CLI cannot
@@ -71,13 +72,19 @@ prove that a directory is safe, it skips it and explains why.
 Candidates are checked again immediately before removal. The CLI uses
 `git worktree remove` without `--force` and never deletes branches.
 
+The content-equivalence check recognizes branches integrated through rebase or
+squash merge. It uses `git merge-tree`, does not modify either worktree, and is
+only available with Git 2.38 or newer. Detached worktrees and repositories with
+custom merge drivers keep the stricter ancestry-only rule. Older Git versions
+remain supported but also keep that conservative behavior.
+
 ### A note about remote branches
 
 The CLI does not contact GitHub, and a deleted remote branch alone does not
 prove that its work was merged. Run `git fetch --prune` first if you want the
 decision to use the latest remote refs. Squash-merged or rebased branches may
-still be skipped because their original `HEAD` is not an ancestor of the base
-branch; this conservative behavior avoids discarding work based on a guess.
+still be skipped when Git cannot prove that merging them would leave the base
+unchanged. This conservative behavior avoids discarding work based on a guess.
 
 If a repository has been moved, Git may still hold worktree paths from its old
 location. In that case, repair the metadata with `git worktree repair` before

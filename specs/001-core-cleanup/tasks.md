@@ -24,3 +24,5 @@
 - [x] T011 Add temporary-repository integration tests for all safety invariants.
 - [x] T012 Run Effect diagnostics, typecheck, tests, build, and package smoke test.
 - [x] T013 Complete documentation and mark specification tasks finished.
+- [x] T014 Recognize safely squash-merged and rebased attached branches through
+      a no-effect merge proof, with real Git integration coverage.

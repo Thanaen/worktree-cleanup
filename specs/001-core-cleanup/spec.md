@@ -22,8 +22,9 @@ worktree is removed.
 **Acceptance Scenarios**:
 
 1. **Given** a clean registered worktree whose HEAD is an ancestor of the base
-   branch, **When** cleanup is confirmed, **Then** Git removes its directory and
-   registration but keeps its branch.
+   branch, or whose attached branch would make no content change when merged
+   into the base branch, **When** cleanup is confirmed, **Then** Git removes its
+   directory and registration but keeps its branch.
 2. **Given** dirty, locked, unmerged, current, or unregistered directories,
    **When** cleanup runs, **Then** they are not offered for deletion.
 3. **Given** at least one candidate and no `--yes`, **When** the user refuses,
@@ -75,6 +76,11 @@ without an interactive prompt.
   and paths whose Git state cannot be proven are skipped.
 - A detached worktree is removable only when its HEAD is reachable from the
   detected base ref.
+- A clean merge whose result has the same tree as the base proves that an
+  attached branch's content is already integrated after a squash merge or
+  rebase. This fallback MUST fail closed when Git cannot perform the merge,
+  when a custom merge driver is configured, or when the branch no longer
+  points at the assessed HEAD.
 - The main worktree and the worktree executing the command are never removed.
 - A candidate that becomes dirty or unmerged between preview and deletion is
   revalidated and skipped.
@@ -97,7 +103,12 @@ without an interactive prompt.
 - **FR-005**: A removable worktree MUST be registered by Git, present, not a
   symlink, not locked, not the repository's main worktree, not the invocation
   worktree, and clean according to `git status --porcelain --untracked-files=all`.
-- **FR-006**: The candidate HEAD MUST be an ancestor of a trusted base ref.
+- **FR-006**: The candidate HEAD MUST either be an ancestor of a trusted base
+  ref, or belong to an attached branch whose simulated merge into the base is
+  clean and produces exactly the base tree. The content-equivalence fallback
+  MUST NOT run for detached worktrees, custom merge-driver configuration, a
+  branch ref that differs from the assessed HEAD, or a Git version without the
+  required merge-tree capability.
 - **FR-007**: Base-ref detection MUST prefer `refs/remotes/origin/HEAD`, then
   local `main`, then local `master`, then the main worktree's current branch.
   If none can be proven, the worktree MUST be skipped.
@@ -133,6 +144,9 @@ without an interactive prompt.
   under five seconds on a local filesystem, excluding user confirmation time.
 - **SC-004**: `pnpm check` validates formatting, Effect-aware diagnostics,
   TypeScript, tests, and build from a clean checkout.
+- **SC-005**: Integration tests prove that fully squash-merged and rebased
+  attached branches are removable, while partially integrated, modified,
+  reverted, conflicting, detached, and custom-driver cases remain skipped.
 
 ## Assumptions
 

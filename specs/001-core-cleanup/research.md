@@ -12,8 +12,17 @@ Effect-aware diagnostics.
 `git worktree list --porcelain -z` is authoritative for registration, HEAD,
 branch, detached state, lock state, and prunable metadata. `git status --porcelain
 --untracked-files=all` proves cleanliness. `git merge-base --is-ancestor` proves
-that a candidate commit is included in the base ref. `git worktree remove`
-without force performs Git's own final safety check.
+that a candidate commit is included in the base ref. When ancestry differs after
+a rebase or squash merge, `git merge-tree --write-tree` can simulate merging the
+candidate into the base without touching either worktree. A clean result whose
+tree is identical to the base tree proves that the candidate branch contributes
+no remaining content. This fallback is limited to attached branches whose ref
+still points at the assessed HEAD, so removing the worktree does not make the
+original commits unreachable. It is disabled when custom merge drivers are
+configured and fails closed on Git versions older than 2.38, which do not
+provide the required `merge-tree` mode. `git cherry` was rejected because
+patch-id matching recognizes rebased commits but not a multi-commit squash.
+`git worktree remove` without force performs Git's own final safety check.
 
 ## Default roots
 

@@ -25,6 +25,7 @@ Stable variants: `not-registered`, `symlink`, `main-worktree`, `current-worktree
 - `candidatePath`
 - `repositoryPath`
 - `worktree`: optional `RegisteredWorktree`
+- `integrationEvidence`: optional `ancestor | content-equivalent`
 - `status`: `removable | skipped`
 - `reason`: optional `SkipReason`
 - `detail`: optional human-readable context

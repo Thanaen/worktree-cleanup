@@ -13,6 +13,8 @@ export const skipReasons = [
 
 export type SkipReason = (typeof skipReasons)[number]
 
+export type IntegrationEvidence = "ancestor" | "content-equivalent"
+
 export interface TargetRoot {
   readonly path: string
   readonly source: "explicit" | "worktrees" | "claude" | "codex"
@@ -42,6 +44,7 @@ export interface Assessment {
   readonly repositoryPath?: string
   readonly worktree?: RegisteredWorktree
   readonly baseRef?: string
+  readonly integrationEvidence?: IntegrationEvidence
   readonly status: "removable" | "skipped"
   readonly reason?: SkipReason
   readonly detail?: string
