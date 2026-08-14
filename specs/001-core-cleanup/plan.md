@@ -50,7 +50,9 @@ repos/                 # Effect Git subtree, read-only reference
 2. The filesystem service enumerates immediate, non-symlink child directories.
 3. The Git service groups candidates by common repository and parses
    `git worktree list --porcelain -z` into registered worktrees.
-4. The assessor checks identity, lock, cleanliness, base ref, and ancestry.
+4. The assessor checks identity, lock, cleanliness, base ref, and ancestry. If
+   ancestry differs, an attached branch may still be proven integrated by a
+   clean simulated merge that leaves the base tree unchanged.
 5. The renderer prints the complete plan. The prompt is default-negative.
 6. Confirmed candidates are reassessed and removed through their repository.
 7. The command reports a summary and fails if an operational removal failed.
