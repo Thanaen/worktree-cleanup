@@ -14,15 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/setup@v2
         with:
-          version: 10.17.1
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
+          runtime: node@24
+          cache: true
+          install: false
       - run: npm install --global npm@11.16.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
