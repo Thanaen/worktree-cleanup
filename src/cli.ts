@@ -11,7 +11,8 @@ const directory = Flag.string("dir").pipe(
 
 const yes = Flag.boolean("yes").pipe(
   Flag.withAlias("y"),
-  Flag.withDescription("Approve the displayed cleanup plan without prompting")
+  Flag.withDescription("Approve the displayed cleanup plan without prompting"),
+  Flag.withDefault(false)
 )
 
 const handleError = (error: unknown) => {
