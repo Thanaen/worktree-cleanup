@@ -54,7 +54,7 @@
     "effect": "4.0.0-rc.108"
   },
   "devDependencies": {
-    "@effect/tsgo": "0.36.4",
+    "@effect/tsgo": "0.39.0",
     "@effect/vitest": "4.0.0-rc.108",
     "@types/node": "26.2.0",
     "oxfmt": "0.63.0",
