@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
-    "effect": "4.0.0-rc.108"
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
     "@effect/tsgo": "0.39.0",
