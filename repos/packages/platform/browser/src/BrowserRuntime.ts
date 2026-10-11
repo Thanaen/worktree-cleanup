@@ -2,16 +2,17 @@
  * Browser helper for running a root Effect program.
  *
  * This module exports `runMain`, a browser version of the main Effect runner.
- * It forwards runner options to the core runtime and adds a `beforeunload`
- * listener that interrupts the main fiber when the page is unloading.
+ * It forwards runner options to the core runtime and adds a `pagehide`
+ * listener that interrupts the main fiber when the document is discarded.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import type * as Effect from "effect/Effect"
 import { makeRunMain, type Teardown } from "effect/Runtime"
 
 /**
- * Runs an effect as the browser main program and interrupts its fiber when the page receives a `beforeunload` event.
+ * Runs an effect as the browser main program and interrupts its fiber when the document is discarded.
  *
  * **When to use**
  *
@@ -22,13 +23,15 @@ import { makeRunMain, type Teardown } from "effect/Runtime"
  *
  * Supports both direct and curried call forms. Options are forwarded to
  * `makeRunMain`, including `disableErrorReporting` and custom `teardown`
- * behavior.
+ * behavior. A persisted `pagehide` event is ignored because the document is
+ * entering the back/forward cache and may be restored.
  *
  * **Gotchas**
  *
- * The `beforeunload` interruption is best-effort. Browser teardown may prevent
+ * The `pagehide` interruption is best-effort. Browser teardown may prevent
  * asynchronous finalizers, network work, timers, or prompts from completing.
  *
+ * @stability unstable
  * @category running
  * @since 4.0.0
  */
@@ -46,8 +49,16 @@ export const runMain: {
       readonly teardown?: Teardown | undefined
     }
   ): void
-} = makeRunMain(({ fiber }) => {
-  globalThis.addEventListener("beforeunload", () => {
-    fiber.interruptUnsafe(fiber.id)
+} = makeRunMain(({ fiber, teardown }) => {
+  function onPageHide(event: PageTransitionEvent) {
+    if (!event.persisted) {
+      fiber.interruptUnsafe(fiber.id)
+    }
+  }
+
+  globalThis.addEventListener("pagehide", onPageHide)
+  fiber.addObserver((exit) => {
+    globalThis.removeEventListener("pagehide", onPageHide)
+    teardown(exit, () => {})
   })
 })

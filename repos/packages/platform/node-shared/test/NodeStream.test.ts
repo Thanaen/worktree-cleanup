@@ -2,6 +2,7 @@ import * as NodeStream from "@effect/platform-node-shared/NodeStream"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import * as Array from "effect/Array"
+import * as ByteSize from "effect/ByteSize"
 import * as Channel from "effect/Channel"
 import * as Console from "effect/Console"
 import * as Stream from "effect/Stream"
@@ -74,6 +75,25 @@ describe("Stream", () => {
       )
 
       assert.strictEqual(result, "ABC")
+    }))
+
+  it.effect("pipeThroughDuplex propagates upstream failure", () =>
+    Effect.gen(function*() {
+      const result = yield* Stream.fail("upstream error").pipe(
+        NodeStream.pipeThroughDuplex({
+          evaluate: () =>
+            new Duplex({
+              read() {},
+              write(_chunk, _encoding, callback) {
+                callback()
+              }
+            })
+        }),
+        Stream.runDrain,
+        Effect.flip
+      )
+
+      assert.strictEqual(result, "upstream error")
     }))
 
   it.effect("pipeThroughDuplex write error", () =>
@@ -179,5 +199,53 @@ describe("Stream", () => {
       yield* NodeStream.toString(() => stream).pipe(Effect.forkChild)
       yield* Effect.yieldNow
       assert.strictEqual(stream.listenerCount("error"), 1)
+    }))
+
+  it.effect("collects strings and array buffers with an Infinity maxBytes limit", () =>
+    Effect.gen(function*() {
+      const chunks = [Buffer.from("hello "), Buffer.from("world")]
+      const text = yield* NodeStream.toString(() => Readable.from(chunks), { maxBytes: Infinity })
+      const buffer = yield* NodeStream.toArrayBuffer(() => Readable.from(chunks), { maxBytes: Infinity })
+
+      assert.strictEqual(text, "hello world")
+      assert.deepStrictEqual(new Uint8Array(buffer), new TextEncoder().encode("hello world"))
+    }))
+
+  it.effect("toString enforces a zero maxBytes limit", () =>
+    Effect.gen(function*() {
+      let emitted = false
+      const stream = new Readable({
+        read() {
+          if (emitted) return
+          emitted = true
+          this.push("a")
+        }
+      })
+      const error = yield* NodeStream.toString(() => stream, {
+        maxBytes: "0 B",
+        onError: () => "maxBytes exceeded" as const
+      }).pipe(Effect.flip)
+
+      assert.strictEqual(error, "maxBytes exceeded")
+      assert.isTrue(stream.destroyed)
+    }))
+
+  it.effect("toArrayBuffer enforces a zero maxBytes limit", () =>
+    Effect.gen(function*() {
+      let emitted = false
+      const stream = new Readable({
+        read() {
+          if (emitted) return
+          emitted = true
+          this.push(Buffer.from("a"))
+        }
+      })
+      const error = yield* NodeStream.toArrayBuffer(() => stream, {
+        maxBytes: ByteSize.zero,
+        onError: () => "maxBytes exceeded" as const
+      }).pipe(Effect.flip)
+
+      assert.strictEqual(error, "maxBytes exceeded")
+      assert.isTrue(stream.destroyed)
     }))
 })

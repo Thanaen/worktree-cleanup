@@ -1,5 +1,5 @@
 import { Console, Effect, FileSystem, Option, Path } from "effect"
-import { Prompt } from "effect/unstable/cli"
+import { Prompt } from "effect/cli"
 
 import type {
   Assessment,
@@ -503,7 +503,7 @@ export const runCleanup = Effect.fn("runCleanup")(function* (options: CleanupOpt
   const confirmed = options.yes
     ? true
     : yield* Prompt.run(
-        Prompt.confirm({
+        Prompt.Confirm({
           message: `Remove ${removable.length} stale worktree${removable.length === 1 ? "" : "s"}?`,
           initial: false
         })

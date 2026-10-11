@@ -39,7 +39,7 @@ the same program. New options require a demonstrated user need and documentation
 ## Technical Constraints
 
 - Runtime: supported Node.js LTS versions.
-- Language: strict TypeScript using Effect v4 RC until v4 stable is released.
+- Language: strict TypeScript using Effect v4 stable.
 - Package manager: pnpm with a committed lockfile.
 - LSP and lint diagnostics: `@effect/tsgo`, used instead of a parallel `tsgo`.
 - Distribution: public npm package `@thanaen/worktree-cleanup` with both binary names.

@@ -6,6 +6,7 @@ and project principles live in `.specify/memory/constitution.md`.
 ## Vendored repositories
 
 External repositories are vendored under `repos/` as Git subtrees.
+`repos/` holds `Effect-TS/effect` at the `effect@<version>` tag matching `package.json`.
 
 - Treat vendored repositories as read-only reference material.
 - Prefer examples and patterns from vendored source over generated guesses.

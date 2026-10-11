@@ -9,9 +9,12 @@
  * for the server alone, the Bun HTTP support services, the combined server,
  * configurable server options, and a test server with an HTTP client.
  *
+ * @stability unstable
  * @since 4.0.0
  */
 import type { Server as BunServer, ServerWebSocket } from "bun"
+import type * as Arr from "effect/Array"
+import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import type { ConfigError } from "effect/Config"
 import * as Context from "effect/Context"
@@ -20,34 +23,36 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
-import * as FiberSet from "effect/FiberSet"
 import type * as FileSystem from "effect/FileSystem"
-import { flow } from "effect/Function"
+import { constVoid, flow } from "effect/Function"
+import * as Cookies from "effect/http/Cookies"
+import * as Etag from "effect/http/Etag"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as Headers from "effect/http/Headers"
+import type { HttpClient } from "effect/http/HttpClient"
+import * as HttpEffect from "effect/http/HttpEffect"
+import * as IncomingMessage from "effect/http/HttpIncomingMessage"
+import type { HttpMethod } from "effect/http/HttpMethod"
+import type { HttpPlatform } from "effect/http/HttpPlatform"
+import * as Server from "effect/http/HttpServer"
+import * as Error from "effect/http/HttpServerError"
+import * as ServerRequest from "effect/http/HttpServerRequest"
+import * as ServerResponse from "effect/http/HttpServerResponse"
+import type * as Multipart from "effect/http/Multipart"
+import * as UrlParams from "effect/http/UrlParams"
 import * as Inspectable from "effect/Inspectable"
 import * as Layer from "effect/Layer"
+import * as NetAddress from "effect/net/NetAddress"
 import * as Option from "effect/Option"
 import type * as Path from "effect/Path"
 import type * as Record from "effect/Record"
+import * as Result from "effect/Result"
+import * as Scheduler from "effect/Scheduler"
 import type * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
+import * as Socket from "effect/socket/Socket"
 import * as Stream from "effect/Stream"
-import * as Cookies from "effect/unstable/http/Cookies"
-import * as Etag from "effect/unstable/http/Etag"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as Headers from "effect/unstable/http/Headers"
-import type { HttpClient } from "effect/unstable/http/HttpClient"
-import * as HttpEffect from "effect/unstable/http/HttpEffect"
-import * as IncomingMessage from "effect/unstable/http/HttpIncomingMessage"
-import type { HttpMethod } from "effect/unstable/http/HttpMethod"
-import type { HttpPlatform } from "effect/unstable/http/HttpPlatform"
-import * as Server from "effect/unstable/http/HttpServer"
-import * as Error from "effect/unstable/http/HttpServerError"
-import * as ServerRequest from "effect/unstable/http/HttpServerRequest"
-import type * as ServerResponse from "effect/unstable/http/HttpServerResponse"
-import type * as Multipart from "effect/unstable/http/Multipart"
-import * as UrlParams from "effect/unstable/http/UrlParams"
-import * as Socket from "effect/unstable/socket/Socket"
 import * as Platform from "./BunHttpPlatform.ts"
 import * as BunMultipart from "./BunMultipart.ts"
 import * as BunServices from "./BunServices.ts"
@@ -56,6 +61,7 @@ import * as BunStream from "./BunStream.ts"
 /**
  * Bun serve options accepted by the HTTP server, extended with typed route definitions.
  *
+ * @stability unstable
  * @category options
  * @since 4.0.0
  */
@@ -77,17 +83,33 @@ export type ServeOptions<R extends string> =
  * through, e.g.
  * `BunHttpServer.layer({ port: 3000, websocket: { perMessageDeflate: true } })`.
  *
+ * The `compressionThreshold` option controls the minimum message size in bytes
+ * that is compressed when per-message deflate is negotiated. It defaults to
+ * 1024, matching the default threshold of Node's `ws` server.
+ *
+ * @stability unstable
  * @category options
  * @since 4.0.0
  */
-export type WebSocketOptions = Omit<
-  Bun.WebSocketHandler<WebSocketContext>,
-  "open" | "message" | "close" | "drain" | "ping" | "pong" | "data" | "binaryType"
->
+export type WebSocketOptions =
+  & Omit<
+    Bun.WebSocketHandler<WebSocketContext>,
+    "open" | "message" | "close" | "drain" | "ping" | "pong" | "data" | "binaryType"
+  >
+  & {
+    /**
+     * The minimum message size in bytes that is compressed when per-message
+     * deflate is negotiated.
+     *
+     * @default 1024
+     */
+    readonly compressionThreshold?: number | undefined
+  }
 
 /**
  * Creates a scoped Bun `HttpServer` from `Bun.serve` options, stopping the server on scope finalization with optional graceful shutdown settings.
  *
+ * @stability unstable
  * @category constructors
  * @since 4.0.0
  */
@@ -100,6 +122,23 @@ export const make = Effect.fnUntraced(
     }
   ) {
     const scope = yield* Effect.scope
+    let listenOptions = options
+    if (!("unix" in options) || options.unix === undefined) {
+      const internetOptions = options as Bun.Serve.HostnamePortServeOptions<WebSocketContext>
+      let hostname = internetOptions.hostname ?? "::"
+      if (Result.isFailure(NetAddress.ipFromString(hostname))) {
+        hostname = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await Bun.dns.lookup(hostname, { socketType: "tcp" })
+            if (result.length === 0) throw new globalThis.Error(`Could not resolve hostname: ${hostname}`)
+            return result[0].address
+          },
+          catch: (cause) => new Error.ServeError({ cause })
+        })
+      }
+      listenOptions = { ...options, hostname }
+    }
+    const { compressionThreshold = MIN_COMPRESSIBLE_SIZE, ...websocket } = options.websocket ?? {}
     const handlerStack: Array<(request: Request, server: BunServer<WebSocketContext>) => Response | Promise<Response>> =
       [
         function(_request, _server) {
@@ -107,10 +146,10 @@ export const make = Effect.fnUntraced(
         }
       ]
     const server = Bun.serve<WebSocketContext, R>({
-      ...options as ServeOptions<R>,
+      ...listenOptions as ServeOptions<R>,
       fetch: handlerStack[0],
       websocket: {
-        ...options.websocket,
+        ...websocket,
         open(ws) {
           Deferred.doneUnsafe(ws.data.deferred, Exit.succeed(ws))
         },
@@ -119,16 +158,11 @@ export const make = Effect.fnUntraced(
         },
         close(ws, code, closeReason) {
           code = typeof code === "number" ? code : 1001
-          Deferred.doneUnsafe(
-            ws.data.closeDeferred,
-            Socket.defaultCloseCodeIsError(code)
-              ? Exit.fail(
-                new Socket.SocketError({
-                  reason: new Socket.SocketCloseError({ code, closeReason })
-                })
-              )
-              : Exit.void
-          )
+          const error = new Socket.SocketError({
+            reason: new Socket.SocketCloseError({ code, closeReason })
+          })
+          ws.data.closeError = error
+          ws.data.onClose(error)
         }
       }
     })
@@ -143,8 +177,14 @@ export const make = Effect.fnUntraced(
 
     yield* Scope.addFinalizer(scope, shutdown)
 
+    const address = "unix" in options && options.unix !== undefined
+      ? NetAddress.unixPathAddress(options.unix)
+      : yield* Effect.fromResult(NetAddress.inetAddressFromIpString(server.hostname!, server.port!)).pipe(
+        Effect.mapError((cause) => new Error.ServeError({ cause }))
+      )
+
     return Server.make({
-      address: { _tag: "TcpAddress", port: server.port!, hostname: server.hostname! },
+      address,
       serve: Effect.fnUntraced(function*(httpApp, middleware) {
         const parent = yield* Effect.fiber
         const services = parent.context
@@ -153,7 +193,9 @@ export const make = Effect.fnUntraced(
 
         const httpEffect = HttpEffect.toHandled(httpApp, (request, response) =>
           Effect.sync(() => {
-            ;(request as BunServerRequest).resolve(makeResponse(request, response, services, scope))
+            const bunRequest = request as BunServerRequest
+            bunRequest.resolve(makeResponse(request, response, services, scope))
+            if (upgradedSources.has(bunRequest.source)) return upgradedResponse
           }), middleware)
 
         function handler(request: Request, server: BunServer<WebSocketContext>) {
@@ -161,7 +203,7 @@ export const make = Effect.fnUntraced(
             const context = Context.add(
               services,
               ServerRequest.HttpServerRequest,
-              new BunServerRequest(request, resolve, removeHost(request.url), server)
+              new BunServerRequest(request, resolve, removeHost(request.url), server, compressionThreshold)
             )
             const fiber = Fiber.runIn(Effect.runForkWith(context)(httpEffect), scope)
             request.signal.addEventListener("abort", () => {
@@ -173,15 +215,29 @@ export const make = Effect.fnUntraced(
         yield* Scope.addFinalizerExit(serveScope, () => {
           const index = handlerStack.indexOf(handler)
           if (index !== -1) handlerStack.splice(index, 1)
-          server.reload({ fetch: handlerStack[handlerStack.length - 1] })
+          server.reload({
+            fetch: handlerStack[handlerStack.length - 1],
+            ...(options.routes === undefined ? undefined : { routes: options.routes })
+          })
           return handlerStack.length === 1 ? preemptiveShutdown : Effect.void
         })
         handlerStack.push(handler)
-        server.reload({ fetch: handler })
+        server.reload({
+          fetch: handler,
+          ...(options.routes === undefined ? undefined : { routes: options.routes })
+        })
       })
     })
   }
 )
+
+const MIN_COMPRESSIBLE_SIZE = 1024
+
+// Reported to middleware in place of the handler's discarded response.
+const upgradedResponse = ServerResponse.empty({ status: 101 })
+
+// Keyed by source so request copies from `modify` share the upgrade state.
+const upgradedSources = new WeakSet<Request>()
 
 const makeResponse = (
   request: ServerRequest.HttpServerRequest,
@@ -189,6 +245,9 @@ const makeResponse = (
   context: Context.Context<never>,
   scope: Scope.Scope
 ): Response => {
+  if (ServerResponse.omitsBody(response, request.method === "HEAD")) {
+    return ServerResponse.toWeb(response, { withoutBody: true })
+  }
   const fields: {
     headers: globalThis.Headers
     status?: number
@@ -208,16 +267,15 @@ const makeResponse = (
     fields.statusText = response.statusText
   }
 
-  if (request.method === "HEAD") {
-    return new Response(undefined, fields)
-  }
   response = HttpEffect.scopeTransferToStream(response)
   const body = response.body
   switch (body._tag) {
     case "Empty": {
       return new Response(undefined, fields)
     }
-    case "Uint8Array":
+    case "Uint8Array": {
+      return new Response(body.text ?? body.body as any, fields)
+    }
     case "Raw": {
       if (body.body instanceof Response) {
         for (const [key, value] of fields.headers.entries()) {
@@ -248,6 +306,7 @@ const makeResponse = (
 /**
  * Layer that provides only `HttpServer` by constructing a scoped Bun server from the supplied serve options.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -257,11 +316,12 @@ export const layerServer: <R extends string>(
     readonly gracefulShutdownTimeout?: Duration.Input | undefined
     readonly websocket?: WebSocketOptions | undefined
   }
-) => Layer.Layer<Server.HttpServer> = flow(make, Layer.effect(Server.HttpServer)) as any
+) => Layer.Layer<Server.HttpServer, Error.ServeError> = flow(make, Layer.effect(Server.HttpServer)) as any
 
 /**
  * Layer that provides Bun HTTP support services: `HttpPlatform`, weak ETag generation, and `BunServices`.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -278,6 +338,7 @@ export const layerHttpServices: Layer.Layer<
 /**
  * Layer that provides a Bun `HttpServer` together with the Bun HTTP platform, ETag generator, and Bun services.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -291,12 +352,14 @@ export const layer = <R extends string>(
   | Server.HttpServer
   | HttpPlatform
   | Etag.Generator
-  | BunServices.BunServices
+  | BunServices.BunServices,
+  Error.ServeError
 > => Layer.mergeAll(layerServer(options), layerHttpServices)
 
 /**
  * Layer that starts a Bun HTTP server on an ephemeral port for tests.
  *
+ * @stability unstable
  * @category testing
  * @since 4.0.0
  */
@@ -306,12 +369,13 @@ export const layerTest: Layer.Layer<
   Layer.provide(FetchHttpClient.layer.pipe(
     Layer.provide(Layer.succeed(FetchHttpClient.RequestInit)({ keepalive: false }))
   )),
-  Layer.provideMerge(layer({ port: 0 }))
+  Layer.provideMerge(Layer.orDie(layer({ hostname: "127.0.0.1", port: 0 })))
 )
 
 /**
  * Creates the Bun HTTP server and support-services layer from configurable serve options.
  *
+ * @stability unstable
  * @category layers
  * @since 4.0.0
  */
@@ -325,7 +389,7 @@ export const layerConfig = <R extends string>(
   >
 ): Layer.Layer<
   Server.HttpServer | HttpPlatform | FileSystem.FileSystem | Etag.Generator | Path.Path,
-  ConfigError
+  ConfigError | Error.ServeError
 > =>
   Layer.mergeAll(
     Layer.effect(Server.HttpServer)(Effect.flatMap(Config.unwrap(options), make)),
@@ -338,9 +402,10 @@ export const layerConfig = <R extends string>(
 
 interface WebSocketContext {
   readonly deferred: Deferred.Deferred<ServerWebSocket<WebSocketContext>>
-  readonly closeDeferred: Deferred.Deferred<void, Socket.SocketError>
   readonly buffer: Array<Uint8Array | string>
+  closeError: Socket.SocketError | undefined
   run: (_: Uint8Array | string) => void
+  onClose: (error: Socket.SocketError) => void
 }
 
 function wsDefaultRun(this: WebSocketContext, _: Uint8Array | string) {
@@ -354,6 +419,7 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
   public resolve: (response: Response) => void
   readonly url: string
   private bunServer: BunServer<WebSocketContext>
+  private compressionThreshold: number
   public headersOverride?: Headers.Headers | undefined
   private remoteAddressOverride?: Option.Option<string> | undefined
 
@@ -362,6 +428,7 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
     resolve: (response: Response) => void,
     url: string,
     bunServer: BunServer<WebSocketContext>,
+    compressionThreshold: number,
     headersOverride?: Headers.Headers,
     remoteAddressOverride?: Option.Option<string>
   ) {
@@ -372,6 +439,7 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
     this.resolve = resolve
     this.url = url
     this.bunServer = bunServer
+    this.compressionThreshold = compressionThreshold
     this.headersOverride = headersOverride
     this.remoteAddressOverride = remoteAddressOverride
   }
@@ -394,6 +462,7 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
       this.resolve,
       options.url ?? this.url,
       this.bunServer,
+      this.compressionThreshold,
       options.headers ?? this.headersOverride,
       "remoteAddress" in options ? options.remoteAddress : this.remoteAddressOverride
     )
@@ -539,15 +608,15 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
   get upgrade(): Effect.Effect<Socket.Socket, Error.HttpServerError> {
     return Effect.callback<Socket.Socket, Error.HttpServerError>((resume) => {
       const deferred = Deferred.makeUnsafe<ServerWebSocket<WebSocketContext>>()
-      const closeDeferred = Deferred.makeUnsafe<void, Socket.SocketError>()
       const semaphore = Semaphore.makeUnsafe(1)
 
       const success = this.bunServer.upgrade(this.source, {
         data: {
           deferred,
-          closeDeferred,
           buffer: [],
-          run: wsDefaultRun
+          closeError: undefined,
+          run: wsDefaultRun,
+          onClose: constVoid
         }
       })
       if (!success) {
@@ -561,53 +630,125 @@ class BunServerRequest extends Inspectable.Class implements ServerRequest.HttpSe
         ))
         return
       }
+      upgradedSources.add(this.source)
+      const compressionThreshold = this.compressionThreshold
       resume(Effect.map(Deferred.await(deferred), (ws) => {
         const write = (chunk: Uint8Array | string | Socket.CloseEvent) =>
           Effect.sync(() => {
             if (typeof chunk === "string") {
-              ws.sendText(chunk)
+              ws.sendText(chunk, chunk.length >= compressionThreshold)
             } else if (Socket.isCloseEvent(chunk)) {
               ws.close(chunk.code, chunk.reason)
             } else {
-              ws.sendBinary(chunk)
+              ws.sendBinary(chunk, chunk.byteLength >= compressionThreshold)
             }
-
-            return true
           })
-        const writer = Effect.succeed(write)
-        const runRaw = Effect.fnUntraced(
-          function*<R, E, _>(
-            handler: (_: Uint8Array | string) => Effect.Effect<_, E, R> | void,
-            opts?: { readonly onOpen?: Effect.Effect<void> | undefined }
-          ) {
-            const set = yield* FiberSet.make<any, E>()
-            const run = yield* FiberSet.runtime(set)<R>()
-            function runRaw(data: Uint8Array | string) {
-              const result = handler(data)
-              if (Effect.isEffect(result)) {
-                run(result)
+        const writeAll = (chunks: ReadonlyArray<Uint8Array | string>) =>
+          Effect.sync(() => {
+            for (let i = 0; i < chunks.length; i++) {
+              const chunk = chunks[i]
+              if (typeof chunk === "string") {
+                ws.sendText(chunk, chunk.length >= compressionThreshold)
+              } else {
+                ws.sendBinary(chunk, chunk.byteLength >= compressionThreshold)
               }
             }
-            ws.data.run = runRaw
-            ws.data.buffer.forEach(runRaw)
-            ws.data.buffer.length = 0
-            if (opts?.onOpen) yield* opts.onOpen
-            return yield* FiberSet.join(set)
-          },
-          Effect.scoped,
-          Effect.onExit((exit) => Effect.sync(() => ws.close(exit._tag === "Success" ? 1000 : 1011))),
-          Effect.raceFirst(Deferred.await(closeDeferred)),
-          semaphore.withPermits(1)
-        )
+          })
+        const writer: Socket.Socket["writer"] = Effect.succeed({ write, writeAll })
 
-        return Socket.make({
-          runRaw,
-          writer
+        const reader: Socket.Socket["reader"] = Effect.gen(function*() {
+          const dispatcher = (yield* Scheduler.Scheduler).makeDispatcher()
+          yield* Effect.acquireRelease(semaphore.take(1), () => semaphore.release(1))
+          const closeError = ws.data.closeError ?? (ws.readyState >= 2
+            ? new Socket.SocketError({
+              reason: new Socket.SocketCloseError({ code: 1006 })
+            })
+            : undefined)
+          if (closeError !== undefined && ws.data.buffer.length === 0) {
+            return yield* closeError
+          }
+          const scope = yield* Effect.scope
+
+          type ReadResume = (
+            effect: Effect.Effect<Arr.NonEmptyReadonlyArray<Uint8Array | string>, Socket.SocketError>
+          ) => void
+
+          let buffer: Array<Uint8Array | string> = ws.data.buffer.splice(0)
+          let error: Socket.SocketError | undefined = closeError
+          let waiter: ReadResume | undefined
+          let flushScheduled = false
+
+          function takeBuffer(): Arr.NonEmptyReadonlyArray<Uint8Array | string> {
+            const chunk = buffer
+            buffer = []
+            return chunk as unknown as Arr.NonEmptyReadonlyArray<Uint8Array | string>
+          }
+          function deliver() {
+            flushScheduled = false
+            if (waiter === undefined || buffer.length === 0) return
+            const resumeRead = waiter
+            waiter = undefined
+            resumeRead(Effect.succeed(takeBuffer()))
+          }
+          function push(data: Uint8Array | string) {
+            buffer.push(data)
+            if (waiter !== undefined && !flushScheduled) {
+              flushScheduled = true
+              dispatcher.scheduleTask(deliver, 0)
+            }
+          }
+          function fail(err: Socket.SocketError) {
+            if (error === undefined) error = err
+            if (waiter !== undefined) {
+              const resumeRead = waiter
+              waiter = undefined
+              resumeRead(buffer.length > 0 ? Effect.succeed(takeBuffer()) : Effect.fail(error))
+            }
+          }
+
+          ws.data.run = push
+          ws.data.onClose = fail
+          yield* Scope.addFinalizerExit(
+            scope,
+            (exit) =>
+              Effect.suspend(() => {
+                // resume a pull blocked in another fiber before detaching
+                fail(
+                  new Socket.SocketError({
+                    reason: new Socket.SocketCloseError({ code: 1006 })
+                  })
+                )
+                ws.data.run = wsDefaultRun
+                ws.data.onClose = constVoid
+                ws.close(closeCode(exit))
+                return Effect.void
+              })
+          )
+
+          return {
+            pull: Effect.callback<
+              Arr.NonEmptyReadonlyArray<Uint8Array | string>,
+              Socket.SocketError
+            >((resumeRead) => {
+              if (buffer.length > 0) return resumeRead(Effect.succeed(takeBuffer()))
+              if (error !== undefined) return resumeRead(Effect.fail(error))
+              waiter = resumeRead
+              return Effect.sync(() => {
+                if (waiter === resumeRead) waiter = undefined
+              })
+            }),
+            upgrade: Socket.SocketUpgradeError.unsupported
+          }
         })
+
+        return Socket.make({ reader, writer })
       }))
     })
   }
 }
+
+const closeCode = (exit: Exit.Exit<unknown, unknown>): number =>
+  Exit.isSuccess(exit) ? 1000 : Cause.hasInterruptsOnly(exit.cause) ? 1001 : 1011
 
 const emptyReadbleStream = new ReadableStream({
   start(controller) {
