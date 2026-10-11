@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, it } from "@effect/vitest"
 import { Effect, Exit, Layer } from "effect"
-import { Command } from "effect/unstable/cli"
+import { Command } from "effect/cli"
 
 import { command } from "../src/cli.js"
 import { Git } from "../src/git.js"

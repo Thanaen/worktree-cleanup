@@ -1,15 +1,15 @@
 import { Console, Effect } from "effect"
-import { Command, Flag } from "effect/unstable/cli"
+import { Command, Flag } from "effect/cli"
 
 import packageJson from "../package.json" with { type: "json" }
 import { runCleanup } from "./cleanup.js"
 
-const directory = Flag.string("dir").pipe(
+const directory = Flag.String("dir").pipe(
   Flag.withDescription("Inspect exactly this worktree root and ignore smart defaults"),
   Flag.optional
 )
 
-const yes = Flag.boolean("yes").pipe(
+const yes = Flag.Boolean("yes").pipe(
   Flag.withAlias("y"),
   Flag.withDescription("Approve the displayed cleanup plan without prompting"),
   Flag.withDefault(false)
